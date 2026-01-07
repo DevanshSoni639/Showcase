@@ -1,6 +1,6 @@
 """
 DATA_AGENT.PY - Input Normalization
-Converts any input format to plain text
+Converts any input format into clean plain text for downstream agents
 """
 
 from agno.agent import Agent
@@ -11,14 +11,17 @@ class DataAgent(Agent):
     name = "data_agent"
 
     def run(self, ctx: RunContext):
-        """Convert input to raw text"""
-        input_data = ctx.state.get("input")
-        if not input_data:
-            raise ValueError("No input provided")
+        """Normalize workflow input into raw_text"""
+        if "input" not in ctx.state:
+            raise ValueError("Missing 'input' in workflow state")
 
-        # Dict to text
+        input_data = ctx.state["input"]
+
+        # Dict → readable text
         if isinstance(input_data, dict):
-            raw_text = "\n".join(f"{k}: {v}" for k, v in input_data.items())
+            raw_text = "\n".join(
+                f"{key}: {value}" for key, value in sorted(input_data.items())
+            )
         else:
             raw_text = str(input_data)
 

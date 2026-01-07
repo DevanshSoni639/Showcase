@@ -1,4 +1,5 @@
-# agents/agno_app.py
+import json
+import asyncio
 from agno.workflow import Workflow
 
 from core.data_agent import DataAgent
@@ -12,11 +13,11 @@ def create_app():
     return Workflow(
         name="Portfolio-Builder",
         agents=[
-            DataAgent(),
-            PromptAgent(),
-            GeminiAgent(),
-            SchemaBuilderAgent(),
-            TemplateSelectorAgent(),
+            DataAgent(),                 # ingests raw resume text
+            PromptAgent(),               # builds LLM prompt
+            GeminiAgent(),               # calls Gemini
+            SchemaBuilderAgent(),        # builds structured schema
+            TemplateSelectorAgent(),     # selects template
         ],
     )
 
@@ -24,19 +25,31 @@ def create_app():
 app = create_app()
 
 
-if __name__ == "__main__":
+async def main():
     sample_input = {
         "name": "Arjun Sharma",
         "role": "Full Stack Developer",
         "skills": "Python, React, Docker, AWS",
-        "experience": "5 years",
+        "experience_years": 5,
         "projects": "E-commerce platform, Chat app"
     }
 
     print("🚀 Starting workflow...\n")
-    result = app.run(input=sample_input)
 
-    print("\n✅ Workflow Complete!")
-    print(f"Profile: {result.state.get('profile', {}).get('name')}")
-    print(f"Schema: {result.state.get('schema', {}).get('profile_summary')}")
-    print(f"Template: {result.state.get('template', {}).get('name')}")
+    # Agno expects a STRING input at workflow entry
+    input_text = (
+        "Build a professional portfolio from this resume:\n"
+        + json.dumps(sample_input, indent=2)
+    )
+
+    # ✅ Async execution (CRITICAL FIX)
+    result = await app.run(input_text)
+
+    print("\n✅ Workflow Complete!\n")
+
+    # Safe debug output
+    print(json.dumps(result.state, indent=2, default=str))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

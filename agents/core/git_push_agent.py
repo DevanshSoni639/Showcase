@@ -5,6 +5,7 @@ Automatically commits and pushes generated portfolio to git
 
 import subprocess
 import os
+from pathlib import Path
 from agno.agent import Agent
 from agno.run import RunContext
 
@@ -17,35 +18,38 @@ class BaseGitAgent(Agent):
             args,
             check=True,
             capture_output=True,
-            text=True
+            text=True,
         )
 
-    def _git_add(self, file_path: str):
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
+    def _ensure_git_repo(self):
+        try:
+            self._run_git(["git", "rev-parse", "--is-inside-work-tree"])
+        except subprocess.CalledProcessError:
+            raise RuntimeError("Not inside a git repository")
 
-        self._run_git(["git", "add", file_path])
-        print(f"📝 Added {file_path} to git")
+    def _git_add(self, path: str | Path):
+        path = Path(path)
+
+        if not path.exists():
+            raise FileNotFoundError(f"File or directory not found: {path}")
+
+        self._run_git(["git", "add", str(path)])
 
     def _git_commit(self, name: str):
         commit_msg = f"Add portfolio for {name}"
 
-        # Check if there is anything to commit
         status = self._run_git(["git", "status", "--porcelain"])
         if not status.stdout.strip():
-            print("ℹ️ No changes to commit")
-            return
+            return False
 
         self._run_git(["git", "commit", "-m", commit_msg])
-        print(f"💾 Committed: {commit_msg}")
+        return True
 
     def _git_push(self, branch: str | None = None):
         if branch:
             self._run_git(["git", "push", "-u", "origin", branch])
         else:
             self._run_git(["git", "push"])
-
-        print("🚀 Pushed to remote repository")
 
 
 class GitPushAgent(BaseGitAgent):
@@ -54,6 +58,8 @@ class GitPushAgent(BaseGitAgent):
     name = "git_push_agent"
 
     def run(self, ctx: RunContext):
+        self._ensure_git_repo()
+
         final_output = ctx.state.get("final_output")
         profile = ctx.state.get("profile", {})
 
@@ -64,20 +70,22 @@ class GitPushAgent(BaseGitAgent):
 
         try:
             self._git_add(final_output)
-            self._git_commit(name)
-            self._git_push()
+            committed = self._git_commit(name)
 
-            ctx.state["git_status"] = "✅ Pushed to GitHub"
-            print("✅ Portfolio pushed to GitHub successfully!")
+            if committed:
+                self._git_push()
+                ctx.state["git_status"] = "✅ Pushed to GitHub"
+            else:
+                ctx.state["git_status"] = "ℹ️ No changes to commit"
 
         except Exception as e:
             ctx.state["git_status"] = f"❌ Git push failed: {e}"
-            print(f"⚠️ Git push failed: {e}")
+            raise
 
 
 class GitPushAgentAdvanced(BaseGitAgent):
     """
-    Advanced version with branch creation and GitHub Pages deployment
+    Advanced version with branch creation and optional GitHub Pages deployment
     """
 
     name = "git_push_agent_advanced"
@@ -88,13 +96,15 @@ class GitPushAgentAdvanced(BaseGitAgent):
         self.enable_gh_pages = enable_gh_pages
 
     def run(self, ctx: RunContext):
+        self._ensure_git_repo()
+
         final_output = ctx.state.get("final_output")
         profile = ctx.state.get("profile", {})
 
         if not final_output:
             raise ValueError("No output file to commit")
 
-        name = profile.get("name", "User").replace(" ", "-").lower()
+        name = profile.get("name", "user").replace(" ", "-").lower()
         branch = f"{self.branch_name}-{name}"
 
         try:
@@ -109,21 +119,17 @@ class GitPushAgentAdvanced(BaseGitAgent):
             ctx.state["git_status"] = f"✅ Pushed to branch: {branch}"
             ctx.state["git_branch"] = branch
 
-            print(f"✅ Portfolio pushed to branch: {branch}")
-
         except Exception as e:
             ctx.state["git_status"] = f"❌ Git push failed: {e}"
-            print(f"⚠️ Git push failed: {e}")
+            raise
 
     def _checkout_branch(self, branch: str):
         branches = self._run_git(["git", "branch", "--list", branch])
 
         if branches.stdout.strip():
             self._run_git(["git", "checkout", branch])
-            print(f"🌿 Switched to branch: {branch}")
         else:
             self._run_git(["git", "checkout", "-b", branch])
-            print(f"🌿 Created branch: {branch}")
 
     def _setup_gh_pages(self, branch: str):
         try:
@@ -131,8 +137,9 @@ class GitPushAgentAdvanced(BaseGitAgent):
                 ["gh", "pages", "enable", "--branch", branch],
                 check=True,
                 capture_output=True,
-                text=True
+                text=True,
             )
-            print("🌐 GitHub Pages enabled!")
-        except Exception:
-            print("⚠️ GitHub Pages setup requires GitHub CLI (`gh`) and repo access")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                "GitHub Pages setup failed. Ensure `gh` CLI is installed and authenticated."
+            ) from e
